@@ -6,20 +6,38 @@
 #include <iostream>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #define PORT 8080
 #define QUEUE 20
+#define MAX_CLIENT 10
 
 using namespace std;
+using std::thread;
 
 int CreateSocket();
 void AcceptLoop(int sockfd);
 void HandleMessage(int sockfd);
+void decreaseSock(int sockfd);
+
+int client_count = 0;
+int client_socks[MAX_CLIENT];
+mutex m;
 
 int main() {
 	int sock;
+
+	vector<thread> t;
+
 	sock = CreateSocket();
-	AcceptLoop(sock);
+
+	for (int i = 0; i < MAX_CLIENT; i++)
+		t.push_back(thread(AcceptLoop, sock));
+
+	for (int i = 0; i < MAX_CLIENT; i++)
+		t[i].join();
 
 	return 0;
 }
@@ -56,11 +74,15 @@ void AcceptLoop(int sockfd) {
 	
 	while (true) {
 		conn = accept(sockfd, (sockaddr *)&client, &length);
-
+		
 		if (conn == -1) {
 			cerr << "Connection failed." << endl;
 			exit(1);
 		}
+
+		m.lock();
+		client_socks[client_count++] = conn;
+		m.unlock();
 
 		char host[NI_MAXHOST];
 		char service[NI_MAXHOST];
@@ -76,7 +98,6 @@ void AcceptLoop(int sockfd) {
 			cout << host << " connected on port " << ntohs(client.sin_port) << endl;
 		}
 		HandleMessage(conn);
-
 	}
 }
 
@@ -89,11 +110,13 @@ void HandleMessage(int sockfd) {
 		int received = recv(sockfd, buf, 4096, 0);
 		if (received == -1) {
 			cerr << "Receiving failed." << endl;
+			decreaseSock(sockfd);
 			break;
 		}
 
 		if (received == 0) {
 			cout << "Client disconnected." << endl;
+			decreaseSock(sockfd);
 			break;
 		}
 
@@ -101,35 +124,24 @@ void HandleMessage(int sockfd) {
 			cout << "Client > " << string(buf, 0, received) << endl;
 		}
 
-		send(sockfd, buf, received + 1, 0);
+		m.lock();
+		for (int i = 0; i < client_count; i++)
+			send(client_socks[i], buf, received + 1, 0);
+		m.unlock();
 	}
+}
+
+void decreaseSock(int sockfd) {
+	m.lock();
+	for (int i = 0; i < client_count; i++) {
+		if (sockfd == client_socks[i]) {
+			while (i++ < client_count-1)
+				client_socks[i] = client_socks[i+1];
+			break;
+		}
+	}
+	client_count--;
+	m.unlock();
 
 	close(sockfd);
 }
-/*
-	char buffer[1024];
-
-	while(1) {
-		memset(buffer, 0, sizeof(buffer));
-		int len = recv(conn, buffer, sizeof(buffer), 0);
-
-		if (len == -1) {
-			cerr << "Receiving failed." << endl;
-			break;
-		}
-
-		if (len == 0) {
-			cout << "Client disconnected." << endl;
-			break;
-		}
-
-		if (strcmp(buffer, "exit\n") == 0)
-			break;
-
-		cout << buffer;
-		send(conn, buffer, len, 0);
-	}
-	close(conn);
-	close(sockfd);
-	*/
-

@@ -7,11 +7,15 @@
 #include <unistd.h>
 #include <sys/shm.h>
 #include <cstring>
+#include <thread>
 
 #define PORT	8080
 #define BUFFER_SIZE  1024
 
 using namespace std;
+using std::thread;
+
+void recvThreadPoint(int sockfd);
 
 int main() {
 	
@@ -30,6 +34,8 @@ int main() {
 		cerr << "Connection failed." << endl;
 		exit(1);
 	}
+
+	thread t1(recvThreadPoint, sock);
 
 	char buf[BUFFER_SIZE];
 	string userInput;
@@ -55,3 +61,13 @@ int main() {
 
 	return 0;
 }
+
+void recvThreadPoint(int sockfd) {
+	char msg[BUFFER_SIZE];
+
+	while (recv(sockfd, msg, BUFFER_SIZE, 0) > 0)
+		cout << msg << endl;
+
+	close(sockfd);
+}
+		
